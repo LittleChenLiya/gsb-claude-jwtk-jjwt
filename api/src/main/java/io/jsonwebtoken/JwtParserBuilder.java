@@ -127,6 +127,44 @@ public interface JwtParserBuilder extends Builder<JwtParser> {
     NestedCollection<String, JwtParserBuilder> critical();
 
     /**
+     * Registers an explicit {@link CriticalHandler} that understands and consumes the {@code crit} (critical)
+     * header parameter with the specified {@code name}.  When a parsed JWT's
+     * {@link ProtectedHeader#getCritical() crit} set references {@code name}, the parser will invoke the
+     * specified {@code handler} with the associated header parameter value <b>before any claims are
+     * processed</b>, ensuring the extension semantics are actually understood by application code and not merely
+     * present in the header.
+     *
+     * <p>If a JWT's {@code crit} set references a name that has no registered {@code CriticalHandler} (and is not
+     * declared via the lenient {@link #critical()} collection), the parser rejects the JWT.  A {@code crit} name
+     * without an associated header parameter value, or a {@code crit} set containing duplicate names, is a
+     * structural error and the JWT is always rejected.</p>
+     *
+     * <p><b>Security Note</b></p>
+     *
+     * <p>Handlers are application-provided code references only.  JJWT never instantiates handler classes by
+     * name, never loads handler classes reflectively, and never executes any code discovered within a JWT
+     * itself.  Only handlers explicitly registered via this method are ever invoked.</p>
+     *
+     * <p>For example:</p>
+     * <blockquote><pre>
+     * Jwts.parser()
+     *     .criticalHandler("exp2", (name, value) -&gt; {
+     *         // validate/consume the extension header value here, throwing a
+     *         // JwtException if the value is not acceptable
+     *     })
+     * // ... continue parser configuration ...</pre></blockquote>
+     *
+     * @param name    the {@code crit} extension header parameter name the {@code handler} understands.
+     * @param handler the handler that validates/consumes the associated header parameter value.
+     * @return the builder for method chaining.
+     * @see CriticalHandler
+     * @see #critical()
+     * @see ProtectedHeader#getCritical()
+     * @since 0.14.0
+     */
+    JwtParserBuilder criticalHandler(String name, CriticalHandler handler);
+
+    /**
      * Sets the JCA Provider to use during cryptographic signature and key decryption operations, or {@code null} if the
      * JCA subsystem preferred provider should be used.
      *

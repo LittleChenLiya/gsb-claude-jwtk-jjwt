@@ -18,6 +18,7 @@ package io.jsonwebtoken.impl;
 import io.jsonwebtoken.ClaimsBuilder;
 import io.jsonwebtoken.Clock;
 import io.jsonwebtoken.CompressionCodecResolver;
+import io.jsonwebtoken.CriticalHandler;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.JwtParserBuilder;
 import io.jsonwebtoken.Jwts;
@@ -54,6 +55,7 @@ import java.security.PrivateKey;
 import java.security.Provider;
 import java.security.PublicKey;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -106,6 +108,8 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
     private Clock clock = DefaultClock.INSTANCE;
 
     private Set<String> critical = Collections.emptySet();
+
+    private final Map<String, CriticalHandler> criticalHandlers = new LinkedHashMap<>();
 
     private long allowedClockSkewMillis = 0;
 
@@ -225,6 +229,14 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
                 critical = Collections.asSet(getCollection());
             }
         };
+    }
+
+    @Override
+    public JwtParserBuilder criticalHandler(String name, CriticalHandler handler) {
+        Assert.hasText(name, "Critical header name cannot be null or empty.");
+        Assert.notNull(handler, "CriticalHandler cannot be null.");
+        this.criticalHandlers.put(name.trim(), handler);
+        return this;
     }
 
     @Override
@@ -416,6 +428,7 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
                 keyLocator,
                 clock,
                 critical,
+                criticalHandlers,
                 allowedClockSkewMillis,
                 expClaims,
                 decoder,
