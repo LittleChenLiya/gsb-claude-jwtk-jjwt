@@ -133,21 +133,31 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
             "allow them to be parsed, call the JwtParserBuilder.unsecured() method, but please read the " +
             "security considerations covered in that method's JavaDoc before doing so. Header: ";
 
+    // Note: none of the CRIT_* message constants include the JWT, its header, or any key material.  This is
+    // intentional: exception messages must never leak token or secret values to logs or error handlers.
+
     private static final String CRIT_UNSECURED_MSG = "Unsecured JWSs (those with an " + DefaultHeader.ALGORITHM +
             " header value of '" + Jwts.SIG.NONE.getId() + "') may not use the " + DefaultProtectedHeader.CRIT +
             " header parameter per https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.11 (\"the [crit] Header " +
-            "Parameter MUST be integrity protected; therefore, it MUST occur only within [a] JWS Protected Header)\"." +
-            " Header: %s";
+            "Parameter MUST be integrity protected; therefore, it MUST occur only within [a] JWS Protected Header)\".";
 
     private static final String CRIT_MISSING_MSG = "Protected Header " +
             DefaultProtectedHeader.CRIT + " set references header name '%s', but the header does not contain an " +
             "associated '%s' header parameter as required by " +
-            "https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.11. Header: %s";
+            "https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.11.";
 
     private static final String CRIT_UNSUPPORTED_MSG = "Protected Header " + DefaultProtectedHeader.CRIT +
             " set references unsupported header name '%s'. Application developers expecting to support a JWT " +
             "extension using header '%s' in their application code must indicate it " +
-            "is supported by using the JwtParserBuilder.critical method. Header: %s";
+            "is supported by using the JwtParserBuilder.critical method.";
+
+    private static final String CRIT_DUPLICATE_MSG = "Protected Header " + DefaultProtectedHeader.CRIT +
+            " value contains duplicate header name '%s'. Each " + DefaultProtectedHeader.CRIT +
+            " value must be a unique header parameter name.";
+
+    private static final String CRIT_INVALID_ELEMENT_MSG = "Protected Header " + DefaultProtectedHeader.CRIT +
+            " value must be a JSON array of non-empty header name strings per " +
+            "https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.11.";
 
     private static final String JWE_NONE_MSG = "JWEs do not support key management " + DefaultHeader.ALGORITHM +
             " header value '" + Jwts.SIG.NONE.getId() + "' per " +
@@ -417,8 +427,7 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
                 throw new MalformedJwtException(JWS_NONE_SIG_MISMATCH_MSG);
             }
             if (header.containsKey(DefaultProtectedHeader.CRIT.getId())) {
-                String msg = String.format(CRIT_UNSECURED_MSG, header);
-                throw new MalformedJwtException(msg);
+                throw new MalformedJwtException(CRIT_UNSECURED_MSG);
             }
         } else if (!hasDigest) { // something other than 'none'.  Must have a digest component:
             String fmt = tokenized instanceof TokenizedJwe ? MISSING_JWE_DIGEST_MSG_FMT : MISSING_JWS_DIGEST_MSG_FMT;
@@ -427,6 +436,22 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
         }
         // ----- crit assertions -----
         if (header instanceof ProtectedHeader) {
+            // Structural validation first: the 'crit' JSON array must contain unique, non-empty header name
+            // strings.  Duplicates cannot be detected via the parsed header's Set (they are silently collapsed
+            // during JSON->Set conversion), so the raw deserialized JSON value is inspected directly:
+            Object critJsonValue = m.get(DefaultProtectedHeader.CRIT.getId());
+            if (critJsonValue instanceof Collection) {
+                Set<String> unique = new LinkedHashSet<>();
+                for (Object element : Collections.nullSafe((Collection<?>) critJsonValue)) {
+                    if (!(element instanceof String) || !Strings.hasText((String) element)) {
+                        throw new MalformedJwtException(CRIT_INVALID_ELEMENT_MSG);
+                    }
+                    if (!unique.add((String) element)) {
+                        String msg = String.format(CRIT_DUPLICATE_MSG, element);
+                        throw new MalformedJwtException(msg);
+                    }
+                }
+            }
             Set<String> crit = Collections.nullSafe(((ProtectedHeader) header).getCritical());
             Set<String> supportedCrit = this.critical;
             String b64Id = DefaultJwsHeader.B64.getId();
@@ -441,11 +466,11 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
             // assert any values per https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.11:
             for (String name : crit) {
                 if (!header.containsKey(name)) {
-                    String msg = String.format(CRIT_MISSING_MSG, name, name, header);
+                    String msg = String.format(CRIT_MISSING_MSG, name, name);
                     throw new MalformedJwtException(msg);
                 }
                 if (!supportedCrit.contains(name)) {
-                    String msg = String.format(CRIT_UNSUPPORTED_MSG, name, name, header);
+                    String msg = String.format(CRIT_UNSUPPORTED_MSG, name, name);
                     throw new UnsupportedJwtException(msg);
                 }
             }

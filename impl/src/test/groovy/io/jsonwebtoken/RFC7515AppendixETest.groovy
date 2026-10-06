@@ -60,8 +60,7 @@ class RFC7515AppendixETest {
             Jwts.parser().unsecured().build().parse(jws)
             fail()
         } catch (MalformedJwtException expected) {
-            String msg = String.format(DefaultJwtParser.CRIT_UNSECURED_MSG, header)
-            assertEquals msg, expected.getMessage()
+            assertEquals DefaultJwtParser.CRIT_UNSECURED_MSG, expected.getMessage()
         }
     }
 
@@ -91,7 +90,7 @@ class RFC7515AppendixETest {
             Jwts.parser().unsecured().build().parse(jws)
             fail()
         } catch (UnsupportedJwtException expected) {
-            String msg = String.format(DefaultJwtParser.CRIT_UNSUPPORTED_MSG, critVal, critVal, header)
+            String msg = String.format(DefaultJwtParser.CRIT_UNSUPPORTED_MSG, critVal, critVal)
             assertEquals msg, expected.getMessage()
         }
     }

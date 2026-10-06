@@ -112,6 +112,16 @@ public interface JwtParserBuilder extends Builder<JwtParser> {
      * by the application. <b>Application developers, <em>not JJWT</em>, MUST perform the associated extension behavior
      * using the parsed JWT</b>.</p>
      *
+     * <p><b>Validation Behavior</b></p>
+     *
+     * <p>Registration is explicit and declarative: a {@code crit} header name is accepted only when it has been
+     * registered via this method (or is the RFC 7797 {@code b64} extension, which is supported automatically when
+     * parsing unencoded payloads). A header name that merely exists in the JWT header is not sufficient. The parser
+     * validates the {@code crit} header before processing any claims and rejects the JWT when a {@code crit} name
+     * has not been registered, is duplicated, or has no associated header parameter value. Registration never causes
+     * the parser to load classes or execute code based on header values, and rejection messages never include token
+     * or key material.</p>
+     *
      * <p><b>Continued Parser Configuration</b></p>
      * <p>When finished, use the collection's
      * {@link Conjunctor#and() and()} method to continue parser configuration, for example:

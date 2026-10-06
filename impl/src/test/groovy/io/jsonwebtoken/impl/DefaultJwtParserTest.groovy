@@ -207,8 +207,7 @@ class DefaultJwtParserTest {
             Jwts.parser().unsecured().build().parse(compact)
             fail()
         } catch (MalformedJwtException expected) {
-            String msg = String.format(DefaultJwtParser.CRIT_UNSECURED_MSG, map)
-            assertEquals msg, expected.message
+            assertEquals DefaultJwtParser.CRIT_UNSECURED_MSG, expected.message
         }
     }
 
@@ -221,7 +220,7 @@ class DefaultJwtParserTest {
             Jwts.parser().unsecured().build().parse(compact)
             fail()
         } catch (MalformedJwtException expected) {
-            String msg = String.format(DefaultJwtParser.CRIT_MISSING_MSG, 'whatever', 'whatever', map)
+            String msg = String.format(DefaultJwtParser.CRIT_MISSING_MSG, 'whatever', 'whatever')
             assertEquals msg, expected.message
         }
     }
@@ -235,7 +234,7 @@ class DefaultJwtParserTest {
             Jwts.parser().unsecured().build().parse(compact)
             fail()
         } catch (UnsupportedJwtException expected) {
-            String msg = String.format(DefaultJwtParser.CRIT_UNSUPPORTED_MSG, 'whatever', 'whatever', map)
+            String msg = String.format(DefaultJwtParser.CRIT_UNSUPPORTED_MSG, 'whatever', 'whatever')
             assertEquals msg, expected.message
         }
     }
