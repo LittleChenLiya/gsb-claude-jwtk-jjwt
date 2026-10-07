@@ -41,6 +41,8 @@ import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.impl.io.AbstractParser;
 import io.jsonwebtoken.impl.io.BytesInputStream;
 import io.jsonwebtoken.impl.io.CharSequenceReader;
+import io.jsonwebtoken.impl.io.DuplicateClaimException;
+import io.jsonwebtoken.impl.io.DuplicateKeyScanner;
 import io.jsonwebtoken.impl.io.JsonObjectDeserializer;
 import io.jsonwebtoken.impl.io.Streams;
 import io.jsonwebtoken.impl.io.UncloseableInputStream;
@@ -74,6 +76,7 @@ import io.jsonwebtoken.security.WeakKeyException;
 import javax.crypto.SecretKey;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.Reader;
 import java.io.SequenceInputStream;
@@ -95,6 +98,12 @@ import java.util.function.Function;
 public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtParser {
 
     static final char SEPARATOR_CHAR = '.';
+
+    private static final String CLAIMS_JSON = "claims";
+
+    private static final String DUPLICATE_CLAIM_MSG = "Duplicate key '%s' detected in %s JSON at path '%s' " +
+            "(character offset %d). Duplicate JSON object keys are rejected because the parser is configured " +
+            "to require unique claims.";
 
     private static final JwtTokenizer jwtTokenizer = new JwtTokenizer();
 
@@ -204,6 +213,8 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
 
     private final Deserializer<Map<String, ?>> deserializer;
 
+    private final boolean requireUniqueClaims;
+
     private final ClaimsBuilder expectedClaims;
 
     private final Clock clock;
@@ -225,6 +236,7 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
                      DefaultClaims expectedClaims,
                      Decoder<InputStream, InputStream> base64UrlDecoder,
                      Deserializer<Map<String, ?>> deserializer,
+                     boolean requireUniqueClaims,
                      CompressionCodecResolver compressionCodecResolver,
                      Registry<String, CompressionAlgorithm> zipAlgs,
                      Registry<String, SecureDigestAlgorithm<?, ?>> sigAlgs,
@@ -241,6 +253,7 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
         this.expectedClaims = Jwts.claims().add(expectedClaims);
         this.decoder = Assert.notNull(base64UrlDecoder, "base64UrlDecoder cannot be null.");
         this.deserializer = Assert.notNull(deserializer, "JSON Deserializer cannot be null.");
+        this.requireUniqueClaims = requireUniqueClaims;
         this.sigAlgs = new IdLocator<>(DefaultHeader.ALGORITHM, sigAlgs, "mac or signature", "signature verification", MISSING_JWS_ALG_MSG);
         this.keyAlgs = new IdLocator<>(DefaultHeader.ALGORITHM, keyAlgs, "key management", "decryption", MISSING_JWE_ALG_MSG);
         this.encAlgs = new IdLocator<>(DefaultJweHeader.ENCRYPTION_ALGORITHM, encAlgs, "encryption", "decryption", MISSING_ENC_MSG);
@@ -614,11 +627,14 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
                             in = new BufferedInputStream(in);
                             in.mark(0);
                         }
-                        claimsMap = deserialize(new UncloseableInputStream(in) /* Don't close in case we need to rewind */, "claims");
+                        claimsMap = deserialize(new UncloseableInputStream(in) /* Don't close in case we need to rewind */, CLAIMS_JSON);
                     } catch (DeserializationException |
-                             MalformedJwtException ignored) { // not JSON, treat it as a byte[]
-//                String msg = "Invalid claims: " + e.getMessage();
-//                throw new MalformedJwtException(msg, e);
+                             MalformedJwtException e) { // not JSON, treat it as a byte[]
+                        // ...unless strict unique-claims detection found a duplicate key: that is a
+                        // well-formed JSON claims payload that must be rejected, not opaque content:
+                        if (e instanceof DuplicateClaimException) {
+                            throw e;
+                        }
                     } finally {
                         Streams.reset(in);
                     }
@@ -893,10 +909,39 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
     protected Map<String, ?> deserialize(InputStream in, final String name) {
         try {
             Reader reader = Streams.reader(in);
+            if (this.requireUniqueClaims && CLAIMS_JSON.equals(name)) {
+                // Strict duplicate claim detection: scan the raw JSON for duplicate object keys before
+                // delegating to the configured Deserializer (which would otherwise silently apply
+                // 'last value wins').  The scan reports the duplicate key's JSON path, and the JWT is
+                // rejected instead of allowing one claim value to overwrite another:
+                String json = readFully(reader);
+                DuplicateKeyScanner.Duplicate duplicate = DuplicateKeyScanner.findFirstDuplicate(json);
+                if (duplicate != null) {
+                    String msg = String.format(DUPLICATE_CLAIM_MSG, duplicate.getKey(), name,
+                            duplicate.getPath(), duplicate.getOffset());
+                    throw new DuplicateClaimException(msg);
+                }
+                reader = Streams.reader(json);
+            }
             JsonObjectDeserializer deserializer = new JsonObjectDeserializer(this.deserializer, name);
             return deserializer.apply(reader);
         } finally {
             Objects.nullSafeClose(in);
         }
+    }
+
+    private static String readFully(Reader reader) {
+        StringBuilder sb = new StringBuilder(4096);
+        char[] buf = new char[4096];
+        try {
+            int read;
+            while ((read = reader.read(buf)) != -1) {
+                sb.append(buf, 0, read);
+            }
+        } catch (IOException e) {
+            String msg = "Unable to read JSON claims: " + e.getMessage();
+            throw new DeserializationException(msg, e);
+        }
+        return sb.toString();
     }
 }

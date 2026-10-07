@@ -818,6 +818,29 @@ public interface JwtParserBuilder extends Builder<JwtParser> {
     JwtParserBuilder json(Deserializer<Map<String, ?>> deserializer);
 
     /**
+     * Requires the parser to reject any JWT whose Claims JSON payload contains duplicate JSON object keys,
+     * either at the top level or within nested JSON objects.  When a duplicate key is detected, parsing fails
+     * with a {@link MalformedJwtException} whose message identifies the duplicate key's JSON path (for example
+     * {@code 'user.role'} for a nested key, or {@code 'sub'} for a top-level claim).
+     *
+     * <p><b>Default Behavior</b></p>
+     *
+     * <p>If this method is not called, the parser delegates to the configured JSON
+     * {@link #json(Deserializer) Deserializer} as-is, and most JSON parsers quietly overwrite earlier values
+     * with later ones when duplicate keys are encountered (&quot;last value wins&quot;).  This remains the
+     * default for backwards compatibility.</p>
+     *
+     * <p>Calling this method enables a strict pre-parse check of the Claims JSON: the raw payload is scanned
+     * for duplicate object keys before it is handed to the configured {@code Deserializer}, ensuring no claim
+     * value may silently overwrite another.  Legal tokens without duplicate keys continue to be parsed and
+     * verified exactly as before.</p>
+     *
+     * @return the parser builder for method chaining.
+     * @since 0.14.0
+     */
+    JwtParserBuilder requireUniqueClaims();
+
+    /**
      * Returns an immutable/thread-safe {@link JwtParser} created from the configuration from this JwtParserBuilder.
      *
      * @return an immutable/thread-safe JwtParser created from the configuration from this JwtParserBuilder.

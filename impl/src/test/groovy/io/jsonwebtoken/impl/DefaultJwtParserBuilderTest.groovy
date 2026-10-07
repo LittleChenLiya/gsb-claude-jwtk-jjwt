@@ -48,6 +48,13 @@ class DefaultJwtParserBuilderTest {
         assertTrue builder.@critical.isEmpty()
     }
 
+    @Test
+    void testRequireUniqueClaims() {
+        assertFalse builder.@requireUniqueClaims // disabled by default for backwards compatibility
+        assertSame(builder, builder.requireUniqueClaims())
+        assertTrue builder.@requireUniqueClaims
+    }
+
     /**
      * Asserts that if a .critical() builder is used, and its .and() method is not called, the change to the
      * crit collection is still applied when building the parser.

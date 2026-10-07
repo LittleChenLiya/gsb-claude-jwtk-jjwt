@@ -101,6 +101,8 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
 
     private Deserializer<Map<String, ?>> deserializer;
 
+    private boolean requireUniqueClaims = false;
+
     private final ClaimsBuilder expectedClaims = Jwts.claims();
 
     private Clock clock = DefaultClock.INSTANCE;
@@ -138,6 +140,12 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
     @Override
     public JwtParserBuilder json(Deserializer<Map<String, ?>> reader) {
         this.deserializer = Assert.notNull(reader, "JSON Deserializer cannot be null.");
+        return this;
+    }
+
+    @Override
+    public JwtParserBuilder requireUniqueClaims() {
+        this.requireUniqueClaims = true;
         return this;
     }
 
@@ -420,6 +428,7 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
                 expClaims,
                 decoder,
                 deserializer,
+                requireUniqueClaims,
                 compressionCodecResolver,
                 zipAlgs,
                 sigAlgs,

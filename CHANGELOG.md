@@ -17,6 +17,14 @@ The first JJWT release that uses Java 8+ features.  This release is not strictly
  - The `io.jsonwebtoken.gson.io.GsonSupplierSerializer` class has been renamed to `GsonConfidentialValueSerializer`
  - The `io.jsonwebtoken.jackson.io.JacksonSupplierSerializer` has been renamed to `JacksonConfidentialValueSerializer`.`
 
+#### New Features
+
+- Adds a new `JwtParserBuilder.requireUniqueClaims()` option that enables strict duplicate claim detection: when enabled,
+ any JWT whose Claims JSON payload contains a duplicate JSON object key - either a top-level claim or a key within a
+ nested JSON object - is rejected with a `MalformedJwtException` that reports the duplicate key's JSON path (for example
+ `user.role`) and character offset.  When the option is not enabled, JSON parsing behavior is unchanged and remains
+ entirely dependent on the configured `Deserializer`.
+
 ### 0.13.0
 
 This is the last minor JJWT release branch that will support Java 7. Any necessary emergency bug fixes will be fixed in subsequent `0.13.x` patch releases, but all new development, including Java 8 compatible changes, will be in the next minor (`0.14.0`) release.
