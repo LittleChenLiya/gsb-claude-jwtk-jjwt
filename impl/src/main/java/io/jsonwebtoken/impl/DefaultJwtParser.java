@@ -39,6 +39,7 @@ import io.jsonwebtoken.ProtectedHeader;
 import io.jsonwebtoken.SigningKeyResolver;
 import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.impl.io.AbstractParser;
+import io.jsonwebtoken.impl.io.BoundedInputStream;
 import io.jsonwebtoken.impl.io.BytesInputStream;
 import io.jsonwebtoken.impl.io.CharSequenceReader;
 import io.jsonwebtoken.impl.io.JsonObjectDeserializer;
@@ -181,6 +182,17 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
             "unsecuredDecompression() method, but please read the security considerations covered in that " +
             "method's JavaDoc before doing so.";
 
+    /**
+     * Default maximum number of bytes a (potentially decompressed) JWT payload may contain before the parser
+     * rejects it.  This protects against
+     * <a href="https://www.usenix.org/system/files/conference/usenixsecurity15/sec15-paper-pellegrino.pdf">Denial of Service attacks</a>
+     * via excessive memory allocation when reading or decompressing payloads.
+     * <p>
+     * Package-protected on purpose to allow use in the backwards-compatible {@link DefaultJwtParserBuilder}
+     * implementation.
+     */
+    static final long DEFAULT_MAX_PAYLOAD_BYTES = 1024 * 1024; // 1 MiB
+
     private final Provider provider;
 
     @SuppressWarnings("deprecation")
@@ -212,6 +224,8 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
 
     private final long allowedClockSkewMillis;
 
+    private final long maxPayloadBytes;
+
     //SigningKeyResolver will be removed for 1.0:
     @SuppressWarnings("deprecation")
     DefaultJwtParser(Provider provider,
@@ -229,7 +243,8 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
                      Registry<String, CompressionAlgorithm> zipAlgs,
                      Registry<String, SecureDigestAlgorithm<?, ?>> sigAlgs,
                      Registry<String, KeyAlgorithm<?, ?>> keyAlgs,
-                     Registry<String, AeadAlgorithm> encAlgs) {
+                     Registry<String, AeadAlgorithm> encAlgs,
+                     long maxPayloadBytes) {
         this.provider = provider;
         this.unsecured = unsecured;
         this.unsecuredDecompression = unsecuredDecompression;
@@ -238,6 +253,8 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
         this.clock = Assert.notNull(clock, "Clock cannot be null.");
         this.critical = Collections.nullSafe(critical);
         this.allowedClockSkewMillis = allowedClockSkewMillis;
+        Assert.isTrue(maxPayloadBytes >= 0, "maxPayloadBytes must be greater than or equal to zero.");
+        this.maxPayloadBytes = maxPayloadBytes;
         this.expectedClaims = Jwts.claims().add(expectedClaims);
         this.decoder = Assert.notNull(base64UrlDecoder, "base64UrlDecoder cannot be null.");
         this.deserializer = Assert.notNull(deserializer, "JSON Deserializer cannot be null.");
@@ -589,15 +606,25 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
                     throw new UnsupportedJwtException(msg);
                 }
             }
-            payload = payload.decompress(compressionAlgorithm);
+            payload = payload.decompress(compressionAlgorithm, this.maxPayloadBytes);
         }
 
         Claims claims = null;
         byte[] payloadBytes = payload.getBytes();
+        if (Bytes.length(payloadBytes) > this.maxPayloadBytes) {
+            String msg = "JWT payload size of " + payloadBytes.length + " bytes exceeds the maximum allowed " +
+                    this.maxPayloadBytes + " bytes.";
+            throw new MalformedJwtException(msg);
+        }
         if (payload.isConsumable()) {
             InputStream in = null;
             try {
                 in = payload.toInputStream();
+                if (!(in instanceof BytesInputStream)) {
+                    // A raw (unencoded) payload stream that isn't already byte-backed: enforce the maximum
+                    // payload size as it is read to avoid allocating memory for excessively large payloads:
+                    in = new BoundedInputStream(in, this.maxPayloadBytes);
+                }
 
                 if (!hasContentType(header)) {   // If there is a content type set, then the application using JJWT is expected
                     //                          to convert the byte payload themselves based on this content type

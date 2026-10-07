@@ -17,10 +17,14 @@ package io.jsonwebtoken.impl;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.CompressionCodec;
+import io.jsonwebtoken.CompressionException;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.impl.io.BoundedInputStream;
+import io.jsonwebtoken.impl.io.StreamLimitExceededException;
 import io.jsonwebtoken.impl.io.Streams;
 import io.jsonwebtoken.impl.lang.Bytes;
 import io.jsonwebtoken.io.CompressionAlgorithm;
+import io.jsonwebtoken.io.IOException;
 import io.jsonwebtoken.lang.Assert;
 import io.jsonwebtoken.lang.Collections;
 import io.jsonwebtoken.lang.Strings;
@@ -121,23 +125,83 @@ class Payload {
         return this.zip != null ? zip.compress(out) : out;
     }
 
-    public Payload decompress(CompressionAlgorithm alg) {
+    public Payload decompress(CompressionAlgorithm alg, long maxBytes) {
         Assert.notNull(alg, "CompressionAlgorithm cannot be null.");
         Payload payload = this;
         if (!isString() && isConsumable()) {
+            byte[] data;
             if (alg.equals(Jwts.ZIP.DEF) && !Bytes.isEmpty(this.bytes)) { // backwards compatibility
-                byte[] data = ((CompressionCodec) alg).decompress(this.bytes);
-                payload = new Payload(claims, string, data, null, getContentType());
+                data = deflateDecompress(alg, this.bytes, maxBytes);
             } else {
-                InputStream in = toInputStream();
-                in = alg.decompress(in);
-                payload = new Payload(claims, string, bytes, in, getContentType());
+                data = toByteArray(alg.decompress(toInputStream()), maxBytes, alg);
             }
+            payload = new Payload(claims, string, data, null, getContentType());
             payload.setClaimsExpected(claimsExpected);
         }
         // otherwise it's a String or b64/detached payload, in either case, we don't decompress since the caller is
         // providing the bytes necessary for signature verification as-is, and there's no conversion we need to perform
         return payload;
+    }
+
+    /**
+     * Decompresses DEFLATEd bytes, refusing to read or allocate more than {@code maxBytes} decompressed bytes.
+     * If the standard stream-based decompression fails due to a formatting problem, the
+     * {@link CompressionCodec#decompress(byte[])} implementation is used as a fallback to retain backwards
+     * compatibility with JWTs created by JJWT 0.10.6 and earlier (see
+     * <a href="https://github.com/jwtk/jjwt/issues/536">Issue 536</a>).
+     */
+    private static byte[] deflateDecompress(CompressionAlgorithm alg, byte[] compressed, long maxBytes) {
+        try {
+            return toByteArray(alg.decompress(Streams.of(compressed)), maxBytes, alg);
+        } catch (CompressionException e) { // size limit exceeded or decompression failure, do not fall back:
+            throw e;
+        } catch (IOException e) { // formatting problem, try the backwards-compatible fallback:
+            byte[] data = ((CompressionCodec) alg).decompress(compressed);
+            if (Bytes.length(data) > maxBytes) {
+                throw sizeLimitExceeded(alg, maxBytes, null);
+            }
+            return data;
+        }
+    }
+
+    /**
+     * Reads the decompressed payload stream into a byte array, refusing to read or allocate more than
+     * {@code maxBytes} bytes.
+     *
+     * @param in       the decompressed payload stream
+     * @param maxBytes the maximum number of decompressed bytes allowed
+     * @param alg      the compression algorithm used to produce the stream
+     * @return the decompressed payload bytes
+     * @throws CompressionException if the decompressed payload exceeds {@code maxBytes}, referencing the
+     *                              compression algorithm and retaining the underlying cause
+     */
+    private static byte[] toByteArray(InputStream in, long maxBytes, CompressionAlgorithm alg) {
+        try {
+            return Streams.bytes(new BoundedInputStream(in, maxBytes), "Unable to decompress payload.");
+        } catch (IOException e) {
+            StreamLimitExceededException limitExceeded = findStreamLimitExceeded(e);
+            if (limitExceeded != null) {
+                throw sizeLimitExceeded(alg, maxBytes, limitExceeded);
+            }
+            throw e;
+        }
+    }
+
+    private static CompressionException sizeLimitExceeded(CompressionAlgorithm alg, long maxBytes,
+                                                          StreamLimitExceededException cause) {
+        String msg = "Decompressed payload exceeds the maximum allowed " + maxBytes +
+                " bytes for compression algorithm '" + alg.getId() + "'.";
+        return new CompressionException(msg, cause);
+    }
+
+    private static StreamLimitExceededException findStreamLimitExceeded(Throwable t) {
+        while (t != null) {
+            if (t instanceof StreamLimitExceededException) {
+                return (StreamLimitExceededException) t;
+            }
+            t = t.getCause();
+        }
+        return null;
     }
 
     public byte[] getBytes() {

@@ -109,8 +109,23 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
 
     private long allowedClockSkewMillis = 0;
 
+    private long maxPayloadBytes = DefaultJwtParser.DEFAULT_MAX_PAYLOAD_BYTES;
+
     private Key signatureVerificationKey;
     private Key decryptionKey;
+
+    /**
+     * Sets the maximum number of bytes a (potentially decompressed) JWT payload may contain before the parser
+     * rejects it.  Package-protected on purpose: not (yet) part of the public {@link JwtParserBuilder} API.
+     *
+     * @param maxPayloadBytes the maximum number of payload bytes to allow, must be greater than or equal to zero.
+     * @return the builder for method chaining.
+     */
+    DefaultJwtParserBuilder maxPayloadBytes(long maxPayloadBytes) {
+        Assert.isTrue(maxPayloadBytes >= 0, "maxPayloadBytes must be greater than or equal to zero.");
+        this.maxPayloadBytes = maxPayloadBytes;
+        return this;
+    }
 
     @Override
     public JwtParserBuilder unsecured() {
@@ -424,7 +439,8 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
                 zipAlgs,
                 sigAlgs,
                 keyAlgs,
-                encAlgs
+                encAlgs,
+                this.maxPayloadBytes
         );
     }
 

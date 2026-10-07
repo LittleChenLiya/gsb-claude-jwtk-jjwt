@@ -17,8 +17,10 @@ package io.jsonwebtoken.impl
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.jsonwebtoken.*
+import io.jsonwebtoken.impl.io.StreamLimitExceededException
 import io.jsonwebtoken.impl.lang.JwtDateConverter
 import io.jsonwebtoken.impl.lang.Services
+import io.jsonwebtoken.impl.security.Randoms
 import io.jsonwebtoken.impl.security.TestKeys
 import io.jsonwebtoken.io.AbstractDeserializer
 import io.jsonwebtoken.io.Encoders
@@ -340,5 +342,97 @@ class DefaultJwtParserTest {
             }
         }
         assertEquals value, Jwts.parser().verifyWith(key).build().parse(jwt, handler)
+    }
+
+    // =====================================================================================
+    // maximum payload size tests
+    // =====================================================================================
+
+    private static DefaultJwtParserBuilder parserBuilder() {
+        return Jwts.parser() as DefaultJwtParserBuilder
+    }
+
+    @Test
+    void testMaxPayloadBytesInvalidValue() {
+        try {
+            parserBuilder().maxPayloadBytes(-1)
+            fail()
+        } catch (IllegalArgumentException expected) {
+            assertEquals 'maxPayloadBytes must be greater than or equal to zero.', expected.message
+        }
+    }
+
+    @Test
+    void testMaxPayloadBytesUncompressedJws() {
+        def key = TestKeys.HS256
+        def parser = parserBuilder().maxPayloadBytes(16).verifyWith(key).build()
+
+        // tiny valid uncompressed token, exactly at the limit:
+        byte[] payload = new byte[16]
+        Randoms.secureRandom().nextBytes(payload)
+        String jws = Jwts.builder().content(payload).signWith(key).compact()
+        assertArrayEquals payload, parser.parseSignedContent(jws).getPayload()
+
+        // one byte over the limit is rejected:
+        byte[] tooBig = new byte[17]
+        Randoms.secureRandom().nextBytes(tooBig)
+        String tooBigJws = Jwts.builder().content(tooBig).signWith(key).compact()
+        try {
+            parser.parseSignedContent(tooBigJws)
+            fail()
+        } catch (MalformedJwtException expected) {
+            assertEquals 'JWT payload size of 17 bytes exceeds the maximum allowed 16 bytes.', expected.message
+        }
+    }
+
+    @Test
+    void testMaxPayloadBytesCompressedJws() {
+        def key = TestKeys.HS256
+        def parser = parserBuilder().maxPayloadBytes(64).verifyWith(key).build()
+        for (def zip : [Jwts.ZIP.DEF, Jwts.ZIP.GZIP]) {
+
+            // tiny valid compressed token, decompressing to exactly the limit:
+            byte[] payload = new byte[64]
+            String jws = Jwts.builder().content(payload).compressWith(zip).signWith(key).compact()
+            assertArrayEquals payload, parser.parseSignedContent(jws).getPayload()
+
+            // one decompressed byte over the limit is rejected, retaining the compression algorithm and cause:
+            byte[] tooBig = new byte[65]
+            String tooBigJws = Jwts.builder().content(tooBig).compressWith(zip).signWith(key).compact()
+            try {
+                parser.parseSignedContent(tooBigJws)
+                fail()
+            } catch (CompressionException expected) {
+                String msg = "Decompressed payload exceeds the maximum allowed 64 bytes for compression algorithm '${zip.id}'."
+                assertEquals msg, expected.message
+                assertTrue expected.cause instanceof StreamLimitExceededException
+            }
+        }
+    }
+
+    @Test
+    void testMaxPayloadBytesCompressedClaimsJws() {
+        def key = TestKeys.HS256
+        String jws = Jwts.builder().subject('joe').compressWith(Jwts.ZIP.DEF).signWith(key).compact()
+        def claims = parserBuilder().maxPayloadBytes(1024).verifyWith(key).build().parseSignedClaims(jws).getPayload()
+        assertEquals 'joe', claims.getSubject()
+    }
+
+    @Test
+    void testMaxPayloadBytesInvalidSignatureStillRejected() {
+        // An over-limit (decompressed) payload with an invalid signature must still be rejected as a
+        // signature failure: the payload size limit must not bypass signature verification.
+        def key = TestKeys.HS256
+        def wrongKey = Jwts.SIG.HS256.key().build()
+        byte[] payload = new byte[1024] // decompresses to more than the 16-byte limit configured below
+        String jws = Jwts.builder().content(payload).compressWith(Jwts.ZIP.DEF).signWith(key).compact()
+        def parser = parserBuilder().maxPayloadBytes(16).verifyWith(wrongKey).build()
+        try {
+            parser.parseSignedContent(jws)
+            fail()
+        } catch (SignatureException expected) {
+            assertEquals 'JWT signature does not match locally computed signature. JWT validity cannot be ' +
+                    'asserted and should not be trusted.', expected.message
+        }
     }
 }
