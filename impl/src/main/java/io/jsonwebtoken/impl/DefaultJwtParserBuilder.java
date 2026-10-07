@@ -80,6 +80,8 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
 
     private boolean unsecuredDecompression = false;
 
+    private boolean strictDuplicateClaims = false;
+
     private Locator<? extends Key> keyLocator;
 
     @SuppressWarnings("deprecation") //TODO: remove for 1.0
@@ -138,6 +140,12 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
     @Override
     public JwtParserBuilder json(Deserializer<Map<String, ?>> reader) {
         this.deserializer = Assert.notNull(reader, "JSON Deserializer cannot be null.");
+        return this;
+    }
+
+    @Override
+    public JwtParserBuilder strictDuplicateClaimDetection() {
+        this.strictDuplicateClaims = true;
         return this;
     }
 
@@ -420,6 +428,7 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
                 expClaims,
                 decoder,
                 deserializer,
+                strictDuplicateClaims,
                 compressionCodecResolver,
                 zipAlgs,
                 sigAlgs,

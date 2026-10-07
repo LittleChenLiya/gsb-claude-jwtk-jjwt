@@ -818,6 +818,27 @@ public interface JwtParserBuilder extends Builder<JwtParser> {
     JwtParserBuilder json(Deserializer<Map<String, ?>> deserializer);
 
     /**
+     * Enables strict detection of duplicate JSON member names in the JWT protected header and Claims payload
+     * JSON objects.  When enabled, the parser inspects the raw JSON before deserialization and rejects the JWT
+     * with a {@link io.jsonwebtoken.MalformedJwtException} if any JSON Object - at the top level or nested at
+     * any depth - contains the same member name more than once.  The exception message reports the duplicate
+     * member's full key path (for example {@code nested.sub}) as well as its line and column position within
+     * the JSON document.
+     *
+     * <p>This is a security-hardening option: most JSON libraries silently keep only the last value when a
+     * name is repeated, which can allow differently-configured systems to disagree on a JWT's actual claims.
+     * Enabling this option ensures such ambiguous JWTs are rejected instead of applying
+     * &quot;last value wins&quot; semantics.</p>
+     *
+     * <p>This option is disabled by default to remain fully compatible with the configured JSON
+     * {@link Deserializer}; when disabled, JSON is parsed exactly as it was before this option existed.</p>
+     *
+     * @return the builder for method chaining.
+     * @since 0.14.0
+     */
+    JwtParserBuilder strictDuplicateClaimDetection();
+
+    /**
      * Returns an immutable/thread-safe {@link JwtParser} created from the configuration from this JwtParserBuilder.
      *
      * @return an immutable/thread-safe JwtParser created from the configuration from this JwtParserBuilder.

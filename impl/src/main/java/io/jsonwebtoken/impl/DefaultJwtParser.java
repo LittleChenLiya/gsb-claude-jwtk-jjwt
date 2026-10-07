@@ -41,6 +41,8 @@ import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.impl.io.AbstractParser;
 import io.jsonwebtoken.impl.io.BytesInputStream;
 import io.jsonwebtoken.impl.io.CharSequenceReader;
+import io.jsonwebtoken.impl.io.DuplicateClaimDetector;
+import io.jsonwebtoken.impl.io.DuplicateClaimException;
 import io.jsonwebtoken.impl.io.JsonObjectDeserializer;
 import io.jsonwebtoken.impl.io.Streams;
 import io.jsonwebtoken.impl.io.UncloseableInputStream;
@@ -204,6 +206,8 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
 
     private final Deserializer<Map<String, ?>> deserializer;
 
+    private final boolean strictDuplicateClaims;
+
     private final ClaimsBuilder expectedClaims;
 
     private final Clock clock;
@@ -225,6 +229,7 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
                      DefaultClaims expectedClaims,
                      Decoder<InputStream, InputStream> base64UrlDecoder,
                      Deserializer<Map<String, ?>> deserializer,
+                     boolean strictDuplicateClaims,
                      CompressionCodecResolver compressionCodecResolver,
                      Registry<String, CompressionAlgorithm> zipAlgs,
                      Registry<String, SecureDigestAlgorithm<?, ?>> sigAlgs,
@@ -241,6 +246,7 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
         this.expectedClaims = Jwts.claims().add(expectedClaims);
         this.decoder = Assert.notNull(base64UrlDecoder, "base64UrlDecoder cannot be null.");
         this.deserializer = Assert.notNull(deserializer, "JSON Deserializer cannot be null.");
+        this.strictDuplicateClaims = strictDuplicateClaims;
         this.sigAlgs = new IdLocator<>(DefaultHeader.ALGORITHM, sigAlgs, "mac or signature", "signature verification", MISSING_JWS_ALG_MSG);
         this.keyAlgs = new IdLocator<>(DefaultHeader.ALGORITHM, keyAlgs, "key management", "decryption", MISSING_JWE_ALG_MSG);
         this.encAlgs = new IdLocator<>(DefaultJweHeader.ENCRYPTION_ALGORITHM, encAlgs, "encryption", "decryption", MISSING_ENC_MSG);
@@ -615,6 +621,10 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
                             in.mark(0);
                         }
                         claimsMap = deserialize(new UncloseableInputStream(in) /* Don't close in case we need to rewind */, "claims");
+                    } catch (DuplicateClaimException e) {
+                        // strict duplicate claim rejection must propagate; it must not be
+                        // misinterpreted as a non-JSON (byte[]) payload:
+                        throw e;
                     } catch (DeserializationException |
                              MalformedJwtException ignored) { // not JSON, treat it as a byte[]
 //                String msg = "Invalid claims: " + e.getMessage();
@@ -892,6 +902,13 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
 
     protected Map<String, ?> deserialize(InputStream in, final String name) {
         try {
+            if (this.strictDuplicateClaims) {
+                // Buffer the JSON so it can be scanned for duplicate object member names before
+                // the configured Deserializer is allowed to apply 'last value wins' semantics:
+                byte[] bytes = Streams.bytes(in, "Unable to read " + name + " JSON.");
+                DuplicateClaimDetector.check(new String(bytes, StandardCharsets.UTF_8), name);
+                in = Streams.of(bytes);
+            }
             Reader reader = Streams.reader(in);
             JsonObjectDeserializer deserializer = new JsonObjectDeserializer(this.deserializer, name);
             return deserializer.apply(reader);

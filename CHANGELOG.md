@@ -4,6 +4,15 @@
 
 The first JJWT release that uses Java 8+ features.  This release is not strictly backwards compatible and will also not work with Java 7.
 
+#### New Features
+
+- Adds a new `JwtParserBuilder.strictDuplicateClaimDetection()` option.  When enabled, the parser scans the JWT
+  protected header and Claims payload JSON before deserialization and rejects the JWT with a
+  `MalformedJwtException` if any JSON Object - at the top level or nested at any depth - contains a duplicate
+  member name.  The exception message reports the duplicate member's full key path (for example `nested.sub`)
+  and its line/column position in the JSON document.  The option is disabled by default, preserving the
+  configured JSON deserializer's standard behavior (for example "last value wins").
+
 #### Backwards Compatibility Breaking Changes
 
 - The `io.jsonwebtoken.lang.Supplier` interface has been renamed and moved to `io.jsonwebtoken.security.ConfidentialValue` to avoid any potential risk of conflict or accidental use
