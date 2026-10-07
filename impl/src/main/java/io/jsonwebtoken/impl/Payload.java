@@ -17,18 +17,26 @@ package io.jsonwebtoken.impl;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.CompressionCodec;
+import io.jsonwebtoken.CompressionException;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.impl.io.BoundedInputStream;
 import io.jsonwebtoken.impl.io.Streams;
 import io.jsonwebtoken.impl.lang.Bytes;
 import io.jsonwebtoken.io.CompressionAlgorithm;
 import io.jsonwebtoken.lang.Assert;
 import io.jsonwebtoken.lang.Collections;
+import io.jsonwebtoken.lang.Objects;
 import io.jsonwebtoken.lang.Strings;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
 class Payload {
+
+    private static final String DECOMPRESSED_SIZE_EXCEEDED_MSG = "JWT payload decompressed with compression " +
+            "algorithm '%s' exceeds the maximum allowed %d bytes.";
 
     static final Payload EMPTY = new Payload(Bytes.EMPTY, null);
 
@@ -121,11 +129,13 @@ class Payload {
         return this.zip != null ? zip.compress(out) : out;
     }
 
-    public Payload decompress(CompressionAlgorithm alg) {
+    public Payload decompress(CompressionAlgorithm alg, long maxBytes) {
         Assert.notNull(alg, "CompressionAlgorithm cannot be null.");
         Payload payload = this;
         if (!isString() && isConsumable()) {
-            if (alg.equals(Jwts.ZIP.DEF) && !Bytes.isEmpty(this.bytes)) { // backwards compatibility
+            if (maxBytes >= 0) { // a size limit is enforced, so decompress with a bounded stream:
+                payload = decompressBounded(alg, maxBytes);
+            } else if (alg.equals(Jwts.ZIP.DEF) && !Bytes.isEmpty(this.bytes)) { // backwards compatibility
                 byte[] data = ((CompressionCodec) alg).decompress(this.bytes);
                 payload = new Payload(claims, string, data, null, getContentType());
             } else {
@@ -138,6 +148,29 @@ class Payload {
         // otherwise it's a String or b64/detached payload, in either case, we don't decompress since the caller is
         // providing the bytes necessary for signature verification as-is, and there's no conversion we need to perform
         return payload;
+    }
+
+    /**
+     * Decompresses the payload, ensuring no more than {@code maxBytes} decompressed bytes are allocated or
+     * retained.  Once the decompressed stream reaches {@code maxBytes}, a {@link CompressionException} is thrown
+     * immediately (retaining the compression algorithm identity and the cause) instead of allocating more bytes.
+     */
+    private Payload decompressBounded(CompressionAlgorithm alg, long maxBytes) {
+        BoundedInputStream bounded = null;
+        ByteArrayOutputStream out = new ByteArrayOutputStream((int) Math.min(maxBytes, 8192));
+        try {
+            // bound the decompressed (output) stream, not the compressed (input) stream:
+            bounded = new BoundedInputStream(alg.decompress(toInputStream()), maxBytes);
+            Streams.copy(bounded, out, new byte[8192]);
+        } catch (IOException e) {
+            String msg = bounded != null && bounded.isLimitExceeded() ?
+                    String.format(DECOMPRESSED_SIZE_EXCEEDED_MSG, alg.getId(), maxBytes) :
+                    "Decompression failed: " + e.getMessage();
+            throw new CompressionException(msg, e);
+        } finally {
+            Objects.nullSafeClose(bounded);
+        }
+        return new Payload(claims, string, out.toByteArray(), null, getContentType());
     }
 
     public byte[] getBytes() {

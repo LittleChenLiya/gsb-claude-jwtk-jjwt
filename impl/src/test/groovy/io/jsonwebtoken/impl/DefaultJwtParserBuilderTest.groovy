@@ -393,6 +393,18 @@ class DefaultJwtParserBuilderTest {
     }
 
     @Test
+    void testMaxDecompressedPayloadSizeNotPositive() {
+        [0, -1].each {
+            try {
+                builder.maxDecompressedPayloadSize(it as long)
+                fail()
+            } catch (IllegalArgumentException expected) {
+                assertEquals 'maxBytes value must be greater than zero.', expected.getMessage()
+            }
+        }
+    }
+
+    @Test
     void testDecompressUnprotectedJwtDefault() {
         def codec = Jwts.ZIP.GZIP
         String jwt = Jwts.builder().compressWith(codec).setSubject('joe').compact()

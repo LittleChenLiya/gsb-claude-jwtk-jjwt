@@ -17,6 +17,15 @@ The first JJWT release that uses Java 8+ features.  This release is not strictly
  - The `io.jsonwebtoken.gson.io.GsonSupplierSerializer` class has been renamed to `GsonConfidentialValueSerializer`
  - The `io.jsonwebtoken.jackson.io.JacksonSupplierSerializer` has been renamed to `JacksonConfidentialValueSerializer`.`
 
+#### New Features
+
+- A new `JwtParserBuilder.maxDecompressedPayloadSize(long)` method allows applications to enforce a maximum
+  JWT payload size after decompression.  Decompressed bytes are counted as they are produced, and once the
+  configured limit is reached, parsing is aborted with a `CompressionException` (retaining the compression
+  algorithm identity and the cause) instead of allocating more bytes, helping protect against decompression
+  bomb Denial of Service attacks.  Uncompressed JWT payloads are held to the same limit and rejected with a
+  `MalformedJwtException` when exceeded.  If the method is not called, no payload size limit is enforced.
+
 ### 0.13.0
 
 This is the last minor JJWT release branch that will support Java 7. Any necessary emergency bug fixes will be fixed in subsequent `0.13.x` patch releases, but all new development, including Java 8 compatible changes, will be in the next minor (`0.14.0`) release.

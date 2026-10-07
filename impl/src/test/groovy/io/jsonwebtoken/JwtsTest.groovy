@@ -615,6 +615,111 @@ class JwtsTest {
     }
 
     @Test
+    void testMaxDecompressedPayloadSizeExactBoundary() {
+        // tiny valid compressed token: a limit equal to the exact decompressed payload size must succeed:
+        def alg = Jwts.SIG.HS256
+        SecretKey key = alg.key().build()
+        String payload = 'hello' // 5 bytes
+        String compact = Jwts.builder().content(payload).signWith(key, alg).compressWith(Jwts.ZIP.GZIP).compact()
+        def jws = Jwts.parser().verifyWith(key).maxDecompressedPayloadSize(payload.length()).build()
+                .parseSignedContent(compact)
+        assertEquals payload, new String(jws.payload, StandardCharsets.UTF_8)
+    }
+
+    @Test
+    void testMaxDecompressedPayloadSizeExceeded() {
+        // one byte less than the exact decompressed payload size must be rejected, retaining the
+        // compression algorithm identity and the cause:
+        def alg = Jwts.SIG.HS256
+        SecretKey key = alg.key().build()
+        String payload = 'hello' // 5 bytes
+        [Jwts.ZIP.DEF, Jwts.ZIP.GZIP].each { zip ->
+            String compact = Jwts.builder().content(payload).signWith(key, alg).compressWith(zip).compact()
+            try {
+                Jwts.parser().verifyWith(key).maxDecompressedPayloadSize(payload.length() - 1).build()
+                        .parseSignedContent(compact)
+                fail()
+            } catch (CompressionException expected) {
+                String msg = "JWT payload decompressed with compression algorithm '${zip.id}' exceeds the maximum allowed 4 bytes."
+                assertEquals msg, expected.getMessage()
+                assertNotNull expected.getCause()
+            }
+        }
+    }
+
+    @Test
+    void testMaxDecompressedPayloadSizeUncompressed() {
+        // tiny valid uncompressed token: the same limit applies to uncompressed payloads:
+        def alg = Jwts.SIG.HS256
+        SecretKey key = alg.key().build()
+        String payload = 'hello' // 5 bytes
+        String compact = Jwts.builder().content(payload).signWith(key, alg).compact()
+
+        // exactly at the boundary is allowed:
+        def jws = Jwts.parser().verifyWith(key).maxDecompressedPayloadSize(payload.length()).build()
+                .parseSignedContent(compact)
+        assertEquals payload, new String(jws.payload, StandardCharsets.UTF_8)
+
+        // one byte less than the payload size is rejected:
+        try {
+            Jwts.parser().verifyWith(key).maxDecompressedPayloadSize(payload.length() - 1).build()
+                    .parseSignedContent(compact)
+            fail()
+        } catch (MalformedJwtException expected) {
+            assertEquals 'JWT payload size of 5 bytes exceeds the maximum allowed 4 bytes.', expected.getMessage()
+        }
+    }
+
+    @Test
+    void testMaxDecompressedPayloadSizeWithClaims() {
+        // valid claims tokens still verify and parse in the normal order when a limit is configured:
+        def alg = Jwts.SIG.HS256
+        SecretKey key = alg.key().build()
+        String id = UUID.randomUUID().toString()
+        String compact = Jwts.builder().id(id).subject('joe').signWith(key, alg)
+                .compressWith(Jwts.ZIP.DEF).compact()
+        def jws = Jwts.parser().verifyWith(key).maxDecompressedPayloadSize(1024).build().parseSignedClaims(compact)
+        Claims claims = jws.payload
+        assertEquals id, claims.getId()
+        assertEquals 'joe', claims.getSubject()
+    }
+
+    @Test
+    void testMaxDecompressedPayloadSizeZipBomb() {
+        // a small compact token that decompresses to a large payload must be rejected once the limit is reached:
+        def alg = Jwts.SIG.HS256
+        SecretKey key = alg.key().build()
+        String payload = 'a' * 16384 // highly compressible
+        String compact = Jwts.builder().content(payload).signWith(key, alg).compressWith(Jwts.ZIP.GZIP).compact()
+        assertTrue compact.length() < 1024 // the compressed token itself is small
+        try {
+            Jwts.parser().verifyWith(key).maxDecompressedPayloadSize(1024).build().parseSignedContent(compact)
+            fail()
+        } catch (CompressionException expected) {
+            String msg = "JWT payload decompressed with compression algorithm 'GZIP' exceeds the maximum allowed 1024 bytes."
+            assertEquals msg, expected.getMessage()
+            assertNotNull expected.getCause()
+        }
+    }
+
+    @Test
+    void testMaxDecompressedPayloadSizeInvalidSignature() {
+        // an over-limit payload must not bypass signature verification: the invalid signature is still rejected:
+        def alg = Jwts.SIG.HS256
+        SecretKey key = alg.key().build()
+        SecretKey wrongKey = alg.key().build()
+        String payload = 'a' * 16384
+        String compact = Jwts.builder().content(payload).signWith(key, alg).compressWith(Jwts.ZIP.GZIP).compact()
+        try {
+            Jwts.parser().verifyWith(wrongKey).maxDecompressedPayloadSize(1024).build().parseSignedContent(compact)
+            fail()
+        } catch (io.jsonwebtoken.security.SignatureException expected) {
+            String msg = 'JWT signature does not match locally computed signature. JWT validity cannot be asserted and should not be trusted.'
+            assertEquals msg, expected.getMessage()
+        }
+    }
+
+    @Test
     void testHS256() {
         testHmac(Jwts.SIG.HS256)
     }

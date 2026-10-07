@@ -97,6 +97,32 @@ public interface JwtParserBuilder extends Builder<JwtParser> {
     JwtParserBuilder unsecuredDecompression();
 
     /**
+     * Sets the maximum number of bytes permitted for a JWT payload <em>after</em> any
+     * <a href="https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.3">decompression</a> has been applied.
+     * If a JWT's payload decompresses to more than {@code maxBytes} bytes, parsing is aborted and a
+     * {@link CompressionException} is thrown that retains the compression algorithm identity and the cause.
+     * Payloads of JWTs that do not use compression are held to the same limit and rejected with a
+     * {@link MalformedJwtException} when exceeded.
+     *
+     * <p>This is a security feature to help protect against
+     * <a href="https://en.wikipedia.org/wiki/Zip_bomb">decompression bomb</a> Denial of Service attacks:
+     * decompressed bytes are counted as they are produced, and once {@code maxBytes} is reached, no additional
+     * decompressed bytes are allocated or retained.</p>
+     *
+     * <p>Signature verification and payload parsing otherwise occur in their normal order; this limit never
+     * bypasses signature verification.</p>
+     *
+     * <p>If this method is not called, no payload size limit is enforced.</p>
+     *
+     * @param maxBytes the maximum number of bytes allowed for a JWT payload after any decompression, must be
+     *                 greater than zero.
+     * @return the builder for method chaining.
+     * @throws IllegalArgumentException if {@code maxBytes} is less than 1
+     * @since 0.14.0
+     */
+    JwtParserBuilder maxDecompressedPayloadSize(long maxBytes);
+
+    /**
      * Configures the {@link ProtectedHeader} parameter names used in JWT extensions supported by the application. If
      * the parser encounters a Protected JWT that {@link ProtectedHeader#getCritical() requires} extensions, and
      * those extensions' header names are not specified via this method, the parser will reject that JWT.

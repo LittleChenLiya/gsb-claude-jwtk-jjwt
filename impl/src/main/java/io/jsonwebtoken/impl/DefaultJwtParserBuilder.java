@@ -109,6 +109,8 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
 
     private long allowedClockSkewMillis = 0;
 
+    private long maxDecompressedPayloadSize = -1; // no limit by default
+
     private Key signatureVerificationKey;
     private Key decryptionKey;
 
@@ -121,6 +123,13 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
     @Override
     public JwtParserBuilder unsecuredDecompression() {
         this.unsecuredDecompression = true;
+        return this;
+    }
+
+    @Override
+    public JwtParserBuilder maxDecompressedPayloadSize(long maxBytes) {
+        Assert.isTrue(maxBytes > 0, "maxBytes value must be greater than zero.");
+        this.maxDecompressedPayloadSize = maxBytes;
         return this;
     }
 
@@ -417,6 +426,7 @@ public class DefaultJwtParserBuilder implements JwtParserBuilder {
                 clock,
                 critical,
                 allowedClockSkewMillis,
+                maxDecompressedPayloadSize,
                 expClaims,
                 decoder,
                 deserializer,

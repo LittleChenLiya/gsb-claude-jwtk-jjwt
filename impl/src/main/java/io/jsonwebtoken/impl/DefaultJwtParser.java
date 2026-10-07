@@ -181,6 +181,9 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
             "unsecuredDecompression() method, but please read the security considerations covered in that " +
             "method's JavaDoc before doing so.";
 
+    private static final String PAYLOAD_SIZE_EXCEEDED_MSG = "JWT payload size of %d bytes exceeds the maximum " +
+            "allowed %d bytes.";
+
     private final Provider provider;
 
     @SuppressWarnings("deprecation")
@@ -212,6 +215,8 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
 
     private final long allowedClockSkewMillis;
 
+    private final long maxDecompressedPayloadSize;
+
     //SigningKeyResolver will be removed for 1.0:
     @SuppressWarnings("deprecation")
     DefaultJwtParser(Provider provider,
@@ -222,6 +227,7 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
                      Clock clock,
                      Set<String> critical,
                      long allowedClockSkewMillis,
+                     long maxDecompressedPayloadSize,
                      DefaultClaims expectedClaims,
                      Decoder<InputStream, InputStream> base64UrlDecoder,
                      Deserializer<Map<String, ?>> deserializer,
@@ -238,6 +244,7 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
         this.clock = Assert.notNull(clock, "Clock cannot be null.");
         this.critical = Collections.nullSafe(critical);
         this.allowedClockSkewMillis = allowedClockSkewMillis;
+        this.maxDecompressedPayloadSize = maxDecompressedPayloadSize;
         this.expectedClaims = Jwts.claims().add(expectedClaims);
         this.decoder = Assert.notNull(base64UrlDecoder, "base64UrlDecoder cannot be null.");
         this.deserializer = Assert.notNull(deserializer, "JSON Deserializer cannot be null.");
@@ -589,7 +596,14 @@ public class DefaultJwtParser extends AbstractParser<Jwt<?, ?>> implements JwtPa
                     throw new UnsupportedJwtException(msg);
                 }
             }
-            payload = payload.decompress(compressionAlgorithm);
+            payload = payload.decompress(compressionAlgorithm, this.maxDecompressedPayloadSize);
+        } else if (this.maxDecompressedPayloadSize >= 0) {
+            // not compressed, but the same payload size limit still applies:
+            long size = Bytes.length(payload.getBytes());
+            if (size > this.maxDecompressedPayloadSize) {
+                String msg = String.format(PAYLOAD_SIZE_EXCEEDED_MSG, size, this.maxDecompressedPayloadSize);
+                throw new MalformedJwtException(msg);
+            }
         }
 
         Claims claims = null;
